@@ -1,0 +1,387 @@
+package in.themarauders.stegnotes;
+
+import android.Manifest;
+import android.app.AlertDialog;
+import android.app.LoaderManager.LoaderCallbacks;
+import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.Loader;
+import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Environment;
+import android.provider.MediaStore;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
+import android.support.v4.content.FileProvider;
+import android.support.v7.app.AppCompatActivity;
+import android.text.TextUtils;
+import android.util.Log;
+import android.view.KeyEvent;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.view.inputmethod.EditorInfo;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import com.stealthcopter.steganography.Steg;
+
+import org.apache.commons.codec.android.binary.Hex;
+import org.apache.commons.codec.android.digest.DigestUtils;
+
+import java.io.File;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Locale;
+
+
+/**
+ * A login screen that offers login via email/password.
+ */
+public class LoginActivity extends AppCompatActivity implements LoaderCallbacks<Cursor> {
+
+
+    /**
+     * A dummy authentication store containing known user names and passwords.
+     * TODO: remove after connecting to a real authentication system.
+     */
+    private static final String[] DUMMY_CREDENTIALS = new String[]{
+            "foo@example.com:hello", "bar@example.com:world"
+    };
+    /*
+     * Keep track of the login task to ensure we can cancel it if requested.
+     */
+    final int CAMERA_REQUEST = 0;
+    final int GALLERY_PICTURE = 1;
+    final int STEG_MODE = 1;
+    final int QR_MODE = 2;
+    final int FILE_MODE = 3;
+    public SQLiteDatabase sqLiteDatabase;
+    // UI references.
+    private EditText mPasswordView;
+    private EditText mVerifyPasswordView;
+    private String hashedPass;
+    private String imageToBeSteganographedPath;
+    private ProgressBar spinner;
+    private File ourFolder;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_login);
+
+
+        // Database!
+        sqLiteDatabase = getBaseContext().openOrCreateDatabase("stegnotes.db", MODE_PRIVATE, null);
+        sqLiteDatabase.execSQL("CREATE TABLE IF NOT EXISTS logins(secretKey TEXT);");
+        Cursor query = sqLiteDatabase.rawQuery("SELECT * FROM  logins;", null);
+        if (query.moveToFirst()) {
+            hashedPass = query.getString(0);
+            Intent noteActivity = new Intent(getApplicationContext(), NotebookActivity.class);
+            noteActivity.putExtra("Key", hashedPass);
+            startActivity(noteActivity);
+            query.close();
+            finish();
+        }
+
+
+        // Set up the login form.
+        mPasswordView = findViewById(R.id.password);
+        mVerifyPasswordView = findViewById(R.id.verify_password);
+
+        //For the keyboard actions
+        mVerifyPasswordView.setOnEditorActionListener(new TextView.OnEditorActionListener() {
+            @Override
+            public boolean onEditorAction(TextView textView, int id, KeyEvent keyEvent) {
+                if (id == EditorInfo.IME_ACTION_DONE || id == EditorInfo.IME_NULL) {
+                    attemptLogin();
+                    return true;
+                }
+                return false;
+            }
+        });
+
+        Button mEmailSignInButton = findViewById(R.id.email_sign_in_button);
+        mEmailSignInButton.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                attemptLogin();
+            }
+        });
+
+    }
+
+
+    /**
+     * Attempts to sign in or register the account specified by the login form.
+     * If there are form errors (invalid email, missing fields, etc.), the
+     * errors are presented and no actual login attempt is made.
+     */
+    private void attemptLogin() {
+
+        // First we allow all permissions required.
+        if (ContextCompat.checkSelfPermission(LoginActivity.this,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(LoginActivity.this,
+                    new String[]{
+                            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                            Manifest.permission.READ_EXTERNAL_STORAGE,
+                            Manifest.permission.CAMERA},1);
+        }
+
+        // Store values at the time of the login attempt.
+        String password = mPasswordView.getText().toString();
+        String verifyPassword = mVerifyPasswordView.getText().toString();
+
+
+        boolean cancel = false;
+        View focusView;
+
+        // Check for a valid password, if the user entered one, and if both the fields match.
+        if ((TextUtils.isEmpty(password))) {
+            mPasswordView.setError(getString(R.string.error_invalid_password));
+            focusView = mPasswordView;
+            cancel = true;
+        } else if (!(password.equals(verifyPassword))) {
+            mVerifyPasswordView.setError(getString(R.string.error_unmatched_password));
+            focusView = mVerifyPasswordView;
+            cancel = true;
+        } else {
+
+
+            AlertDialog.Builder mBuilder = new AlertDialog.Builder(LoginActivity.this);
+            View popupView = getLayoutInflater().inflate(R.layout.export_options_popup, null);
+
+            //The textView is inside the popupView.
+            TextView mHashedPasswordView = popupView.findViewById(R.id.hashed_password);
+            mHashedPasswordView.setSelected(true);
+
+
+            // imported the jar in libs/ folder
+            hashedPass = new String(Hex.encodeHex(DigestUtils.sha256(password)));
+            mHashedPasswordView.setText(hashedPass);
+            focusView = mHashedPasswordView;
+            mHashedPasswordView.setSelected(true);
+
+            // Show the popup
+            mBuilder.setView(popupView);
+            AlertDialog dialog = mBuilder.create();
+            dialog.show();
+
+            // TEST FILE CHOOSER!
+            Button fileButton = popupView.findViewById(R.id.exportfile_button);
+            Button stegButton = popupView.findViewById(R.id.exportsteg_button);
+            final Button qrButton = popupView.findViewById(R.id.exportqr_button);
+            Button doneButton = popupView.findViewById(R.id.done_button);
+
+            // Listener for the SHARE button.
+            View.OnClickListener fileButtonOnClickListener = new View.OnClickListener() {
+                @Override
+                public void onClick(View view) {
+                    Intent sendIntent = new Intent();
+                    sendIntent.setAction(Intent.ACTION_SEND);
+                    sendIntent.putExtra(Intent.EXTRA_TEXT, hashedPass);
+                    sendIntent.setType("text/plain");
+                    startActivity(Intent.createChooser(sendIntent, getResources().getText(R.string.send_to)));
+                }
+            };
+            fileButton.setOnClickListener(fileButtonOnClickListener);
+
+
+            // Listener for the steganography button.
+            View.OnClickListener stegButtonOnClickListener = new View.OnClickListener() {
+                @Override
+                public void onClick(View view) {
+                    startGalleryDialog();
+                }
+            };
+            stegButton.setOnClickListener(stegButtonOnClickListener);
+
+            // Listener for the DONE button.
+            View.OnClickListener doneButtonOnClickListener = new View.OnClickListener() {
+                @Override
+                public void onClick(View view) {
+                    sqLiteDatabase.execSQL("INSERT INTO logins VALUES('" + hashedPass + "');");
+                    Cursor query = sqLiteDatabase.rawQuery("SELECT * FROM  logins;", null);
+                    if (query.moveToFirst()) {
+                        hashedPass = query.getString(0);
+                        Intent noteActivity = new Intent(getApplicationContext(), NotebookActivity.class);
+                        noteActivity.putExtra("Key", hashedPass);
+                        startActivity(noteActivity);
+                        query.close();
+                        finish();
+                    } else {
+                        Toast.makeText(getApplicationContext(), "Error in saving the key! Restart the app", Toast.LENGTH_LONG).show();
+                    }
+                }
+            };
+            doneButton.setOnClickListener(doneButtonOnClickListener);
+
+
+
+        }
+        if (cancel) {
+            // There was an error; don't attempt login and focus the first
+            // form field with an error.
+            focusView.requestFocus();
+        }
+
+    }
+
+    // Dialog asks whether the user wants to use an existing image or click a new one.
+    private void startGalleryDialog() {
+
+        // We create our own folder to store QRs and encrypted messages.
+        ourFolder = new File(Environment.getExternalStorageDirectory().toString() + "/StegNotes/");
+        ourFolder.mkdirs();
+
+        AlertDialog.Builder myAlertDialog = new AlertDialog.Builder(LoginActivity.this);
+        myAlertDialog.setTitle("Select Pictures Option");
+        myAlertDialog.setMessage("How do you want to set your picture?");
+
+        // Option 1: Choose from gallery and send GALLERY_PICTURE signal to onActivityResult()
+        myAlertDialog.setPositiveButton("Gallery",
+                new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface arg0, int arg1) {
+                        Intent pictureActionIntent = new Intent(
+                                Intent.ACTION_PICK,
+                                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI); // Opens the default gallery app
+                        startActivityForResult(
+                                pictureActionIntent,
+                                GALLERY_PICTURE);
+                    }
+                });
+
+        // Option 2: Click a new pic, store it in internal sdcard root as "stegnotetemp.jpg", and send CAMERA_REQUEST signal to onActivityResult()
+        myAlertDialog.setNegativeButton("Camera",
+                new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface arg0, int arg1) {
+
+                        Intent intent = new Intent(
+                                MediaStore.ACTION_IMAGE_CAPTURE);
+                        File f = new File(ourFolder, "stegnotetemp.jpg"); // Creates new file at root of internal storage.
+                        intent.putExtra(MediaStore.EXTRA_OUTPUT,
+                                FileProvider.getUriForFile(getApplicationContext(),getPackageName()+".fileprovider",f)); // Puts the data into the created file
+                        startActivityForResult(intent,
+                                CAMERA_REQUEST);
+
+                    }
+                });
+        myAlertDialog.show();
+
+    }
+
+
+    /**
+     * This method is called by implicitly.
+     * Through this the absolute path of the image  to be steganographed is retrieved and stored in stegImagePath.
+     */
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        Bitmap bitmap = null;
+
+        if (resultCode == RESULT_OK && requestCode == CAMERA_REQUEST) {
+
+            // Get the list of all files in sdcard/
+            File f = new File(ourFolder.toString());
+            // Check if any of the files match out temp image
+            for (File temp : f.listFiles()) {
+                if (temp.getName().equals("stegnotetemp.jpg")) {
+                    f = temp;
+                    imageToBeSteganographedPath = f.getPath();
+                    break;
+                }
+            }
+            if (!f.exists()) {
+                Toast.makeText(getBaseContext(),
+                        "Error while capturing image", Toast.LENGTH_LONG)
+                        .show();
+                return;
+            }
+
+
+        }
+        else if (resultCode == RESULT_OK && requestCode == GALLERY_PICTURE) {
+
+            // Intent has data
+            if (data != null) {
+
+                Uri selectedImage = data.getData();
+
+                String[] filePath = {MediaStore.Images.Media.DATA}; // Get all images' data from the mediastore.
+                Cursor c = getContentResolver().query(selectedImage, filePath,
+                        null, null, null);  // Match the one with the same path(?) ad the Intent data().
+                c.moveToFirst(); // store the matched query result int the first row
+                int columnIndex = c.getColumnIndex(filePath[0]);
+                imageToBeSteganographedPath = c.getString(columnIndex);
+                c.close();
+
+            }
+
+        }
+        if (imageToBeSteganographedPath != null) {
+            Log.e("onActivityResult", imageToBeSteganographedPath + "\n\n\n\n\n\n\n\n\n");
+            startSteg();
+        }
+    }
+
+    private void startSteg() {
+        // TEST - Background steganography
+        String hiddenMessage = hashedPass;
+
+        BitmapFactory.Options bmOptions = new BitmapFactory.Options();
+
+        Bitmap bitmap = BitmapFactory.decodeFile(imageToBeSteganographedPath, bmOptions);
+        Log.e("STEGENCODE", "File path: " + imageToBeSteganographedPath);
+
+        // Save the new bitmap in that folder , with filename ending with date.
+        DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
+        String date = dateFormat.format(new java.util.Date());
+
+        String newStegImagePath = ourFolder.getAbsolutePath();
+        newStegImagePath = newStegImagePath + "/IMGST_" + date + ".png";
+
+        try {
+            File encodedBitmap = Steg.withInput(bitmap).encode(hiddenMessage).intoFile(newStegImagePath);
+            Log.e("STEGENCODE", "Encoded!");
+
+
+            Log.e("STEGIMG", "File path: " + newStegImagePath);
+
+
+            bitmap = BitmapFactory.decodeFile(newStegImagePath, bmOptions);
+            String decodedMessage = Steg.withInput(bitmap).decode().intoString();
+
+            Toast.makeText(getApplicationContext(), "Seganography Image path:\n" + newStegImagePath, Toast.LENGTH_LONG).show();
+            Log.e(getClass().getSimpleName(), "decoded string: " + decodedMessage);
+
+        } catch (Exception e) {
+            System.out.print("\n\n\n\n\nexceptopn\n\n\n\n\n");
+        }
+    }
+
+    @Override
+        public Loader<Cursor> onCreateLoader ( int i, Bundle bundle){
+            return null;
+        }
+
+        @Override
+        public void onLoadFinished (Loader < Cursor > loader, Cursor cursor){
+
+        }
+
+        @Override
+        public void onLoaderReset (Loader < Cursor > loader) {
+
+        }
+}

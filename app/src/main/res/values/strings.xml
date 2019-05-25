@@ -1,0 +1,32 @@
+<resources>
+    <string name="app_name">StegNotesApp</string>
+
+    <!-- Strings related to login -->
+    <string name="prompt_email">Email</string>
+    <string name="prompt_password">Password</string>
+    <string name="prompt_verify_password">Verify Password</string>
+    <string name="action_sign_in">Generate Secret Key</string>
+    <string name="export_to_file">SHARE</string>
+
+    <string name="action_sign_in_short">Sign in</string>
+    <string name="error_invalid_email">This email address is invalid</string>
+    <string name="error_invalid_password">This password is invalid</string>
+    <string name="error_incorrect_password">This passwords are incorrect</string>
+    <string name="error_field_required">This field is required</string>
+    <string name="permission_rationale">"Contacts permissions are needed for providing email
+        completions."
+    </string>
+    <string name="your_secret_key">Your Secret Key:</string>
+    <string name="share_button">Share</string>
+    <string name="export_steganography">STEGANOGRAPHY</string>
+    <string name="done">Done</string>
+    <string name="how_do_you_want_to_store_your_key">How do you want to store your key ?</string>
+    <string name="send_to">Send To..</string>
+    <string name="gallery_or_camera">How do you want to select the picture?</string>
+    <string name="select_picture">Select Picture</string>
+    <string name="action_settings">List Notes</string>
+    <string name="title_activity_note_select">NoteSelect</string>
+    <string name="type_here">Type here...</string>
+    <string name="cancel">Cancel</string>
+    <string name="qr">qr</string>
+</resources>
